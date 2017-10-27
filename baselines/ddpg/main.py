@@ -28,8 +28,8 @@ def run(env_id, seed, noise_type, layer_norm, evaluation, **kwargs):
 
     if evaluation and rank==0:
         eval_env = gym.make(env_id)
-        eval_env = bench.Monitor(eval_env, os.path.join(logger.get_dir(), 'gym_eval'))
-        env = bench.Monitor(env, None)
+        eval_env = bench.Monitor(eval_env, logger.get_dir() and os.path.join(logger.get_dir(), 'gym_eval'))
+#        env = bench.Monitor(env, None)
     else:
         eval_env = None
 
@@ -83,7 +83,7 @@ def parse_args():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     
     parser.add_argument('--env-id', type=str, default='HalfCheetah-v1')
-    boolean_flag(parser, 'render-eval', default=False)
+    boolean_flag(parser, 'render-eval', default=True)
     boolean_flag(parser, 'layer-norm', default=True)
     boolean_flag(parser, 'render', default=False)
     boolean_flag(parser, 'normalize-returns', default=False)
@@ -100,10 +100,12 @@ def parse_args():
     parser.add_argument('--nb-epochs', type=int, default=500)  # with default settings, perform 1M steps total
     parser.add_argument('--nb-epoch-cycles', type=int, default=20)
     parser.add_argument('--nb-train-steps', type=int, default=50)  # per epoch cycle and MPI worker
-    parser.add_argument('--nb-eval-steps', type=int, default=100)  # per epoch cycle and MPI worker
+    parser.add_argument('--nb-eval-steps', type=int, default=1000)  # per epoch cycle and MPI worker
     parser.add_argument('--nb-rollout-steps', type=int, default=100)  # per epoch cycle and MPI worker
     parser.add_argument('--noise-type', type=str, default='adaptive-param_0.2')  # choices are adaptive-param_xx, ou_xx, normal_xx, none
-    boolean_flag(parser, 'evaluation', default=False)
+    boolean_flag(parser, 'evaluation', default=True)
+    parser.add_argument('--eval_interval', type=int, default=20)
+
     return vars(parser.parse_args())
 
 
