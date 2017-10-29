@@ -102,6 +102,7 @@ class DDPG(object):
         normalized_obs1 = tf.clip_by_value(normalize(self.obs1, self.obs_rms),
             self.observation_range[0], self.observation_range[1])
 
+
         # Return normalization.
         if self.normalize_returns:
             with tf.variable_scope('ret_rms'):

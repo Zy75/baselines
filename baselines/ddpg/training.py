@@ -73,13 +73,14 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                     # Predict next action.
                     action, q = agent.pi(obs, apply_noise=True, compute_Q=True)
                     assert action.shape == env.action_space.shape
-
+                     
                     # Execute next action.
                     if rank == 0 and render:
                         env.render()
                     assert max_action.shape == action.shape
                     new_obs, r, done, info = env.step(max_action * action)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
                     t += 1
+
                     if rank == 0 and render:
                         env.render()
                     episode_reward += r
@@ -123,17 +124,29 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                 eval_episode_rewards = []
                 eval_qs = []
 
-                if eval_env is not None and epoch % eval_interval == 1 and cycle ==0:
+                if eval_env is not None and epoch % eval_interval == 1 and cycle == 0:
                     eval_episode_reward = 0.
                     for t_rollout in range(nb_eval_steps):
+                        
+                        print("t=",t_rollout,"rank=",rank,"------------------------",)
+                        
+                        print("eval_obs=",eval_obs)
+
                         eval_action, eval_q = agent.pi(eval_obs, apply_noise=False, compute_Q=True)
                         eval_obs, eval_r, eval_done, eval_info = eval_env.step(max_action * eval_action)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
+                        
+                        print("eval_new_obs=",eval_obs)
+                        print("action=",eval_action)
+                        print("reward,done=",eval_r,eval_done)
+                        print("")
+
                         if render_eval:
                             eval_env.render()
                         eval_episode_reward += eval_r
 
                         eval_qs.append(eval_q)
                         if eval_done:
+
                             eval_obs = eval_env.reset()
                             eval_episode_rewards.append(eval_episode_reward)
                             eval_episode_rewards_history.append(eval_episode_reward)
@@ -161,8 +174,11 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
             combined_stats['train/loss_critic'] = mpi_mean(epoch_critic_losses)
             combined_stats['train/param_noise_distance'] = mpi_mean(epoch_adaptive_distances)
 
+            eval_stats_disp = False
+
             # Evaluation statistics.
-            if eval_env is not None:
+            if eval_env is not None and eval_stats_disp:
+
                 combined_stats['eval/return'] = mpi_mean(eval_episode_rewards)
                 combined_stats['eval/return_history'] = mpi_mean(np.mean(eval_episode_rewards_history))
                 combined_stats['eval/Q'] = mpi_mean(eval_qs)
@@ -180,11 +196,12 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
             logger.dump_tabular()
             logger.info('')
             logdir = logger.get_dir()
+            
             if rank == 0 and logdir:
+
                 if hasattr(env, 'get_state'):
                     with open(os.path.join(logdir, 'env_state.pkl'), 'wb') as f:
                         pickle.dump(env.get_state(), f)
                 if eval_env and hasattr(eval_env, 'get_state'):
                     with open(os.path.join(logdir, 'eval_env_state.pkl'), 'wb') as f:
                         pickle.dump(eval_env.get_state(), f)
-
