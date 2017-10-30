@@ -12,6 +12,7 @@ import numpy as np
 import tensorflow as tf
 from mpi4py import MPI
 
+import cv2
 
 def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, param_noise, actor, critic,
     normalize_returns, normalize_observations, critic_l2_reg, actor_lr, critic_lr, action_noise,
@@ -36,38 +37,68 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
     else:
         saver = None
     
-    step = 0
-    episode = 0
     eval_episode_rewards_history = deque(maxlen=100)
     episode_rewards_history = deque(maxlen=100)
+
     with U.single_threaded_session() as sess:
         # Prepare everything.
         agent.initialize(sess)
-        sess.graph.finalize()
 
         agent.reset()
         obs = env.reset()
         if eval_env is not None:
             eval_obs = eval_env.reset()
+
+        rollout_return_p = tf.placeholder(tf.float32, shape=(), name="roll_ret")
+        rollout_Q_mean_p = tf.placeholder(tf.float32, shape=(), name="roll_Q_mean")
+        eval_return_p = tf.placeholder(tf.float32, shape=(), name="eval_ret")
+        eval_Q_mean_p = tf.placeholder(tf.float32, shape=(), name="eval_Q_mean")
+        tr_loss_actor_p = tf.placeholder(tf.float32, shape=(), name="train_loss_actor")
+        tr_loss_critic_p = tf.placeholder(tf.float32, shape=(), name="train_loss_critic")
+
+
+        if rank == 0:
+
+            with tf.name_scope('summary'):
+                writer = tf.summary.FileWriter('tensorboard_log', sess.graph)
+         
+                tf.summary.scalar('roll_ret', rollout_return_p)
+                tf.summary.scalar('roll_Q_mean', rollout_Q_mean_p)
+                tf.summary.scalar('eval_ret', eval_return_p)
+                tf.summary.scalar('eval_Q_mean', eval_Q_mean_p)
+                tf.summary.scalar('train_loss_actor', tr_loss_actor_p)
+                tf.summary.scalar('train_loss_critic', tr_loss_critic_p)
+   
+                merged = tf.summary.merge_all()
+
+
         done = False
         episode_reward = 0.
         episode_step = 0
         episodes = 0
         t = 0
+        duration = 0
 
-        epoch = 0
         start_time = time.time()
 
-        epoch_episode_rewards = []
-        epoch_episode_steps = []
-        epoch_episode_eval_rewards = []
-        epoch_episode_eval_steps = []
-        epoch_start_time = time.time()
-        epoch_actions = []
-        epoch_qs = []
-        epoch_episodes = 0
         for epoch in range(nb_epochs):
+        
+            epoch_episode_rewards = []
+            epoch_episode_steps = []
+            epoch_start_time = time.time()
+            epoch_actions = []
+            epoch_qs = []
+            epoch_episodes = 0
+
+            epoch_eval_episode_rewards = []
+            epoch_eval_qs = []
+
+            epoch_actor_losses = []
+            epoch_critic_losses = []
+            epoch_adaptive_distances = []
+
             for cycle in range(nb_epoch_cycles):
+
                 # Perform rollouts.
                 for t_rollout in range(nb_rollout_steps):
                     # Predict next action.
@@ -106,9 +137,6 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                         obs = env.reset()
 
                 # Train.
-                epoch_actor_losses = []
-                epoch_critic_losses = []
-                epoch_adaptive_distances = []
                 for t_train in range(nb_train_steps):
                     # Adapt param noise, if necessary.
                     if memory.nb_entries >= batch_size and t % param_noise_adaption_interval == 0:
@@ -121,38 +149,52 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                     agent.update_target_net()
 
                 # Evaluate.
-                eval_episode_rewards = []
-                eval_qs = []
 
-                if eval_env is not None and epoch % eval_interval == 1 and cycle == 0:
+
+                if eval_env is not None:
                     eval_episode_reward = 0.
+                    eval_obs0 = None
+
+                    eval_log = render_eval and epoch % eval_interval == 1 and cycle == 0
+
+                    if eval_log:
+
+                        fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+                        out = cv2.VideoWriter('mujoco_log' + str(epoch) + '.avi', fourcc, 50.0, (500,500))
+
                     for t_rollout in range(nb_eval_steps):
                         
-                        print("t=",t_rollout,"rank=",rank,"------------------------",)
-                        
-                        print("eval_obs=",eval_obs)
-
                         eval_action, eval_q = agent.pi(eval_obs, apply_noise=False, compute_Q=True)
                         eval_obs, eval_r, eval_done, eval_info = eval_env.step(max_action * eval_action)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
                         
-                        print("eval_new_obs=",eval_obs)
-                        print("action=",eval_action)
-                        print("reward,done=",eval_r,eval_done)
-                        print("")
+                        if eval_log:
+                            
+                            out.write( eval_env.render(mode='rgb_array') )
 
-                        if render_eval:
-                            eval_env.render()
+                            print("t=",t_rollout,"rank=",rank,"------------------------",)
+                            print("eval_obs=",eval_obs0)
+                            print("action=",eval_action)
+                            print("eval_new_obs=",eval_obs)
+                            print("reward,done=",eval_r,eval_done)
+                            print(" ")
+ 
+                            eval_obs0 = eval_obs
+
                         eval_episode_reward += eval_r
 
-                        eval_qs.append(eval_q)
+                        epoch_eval_qs.append(eval_q)
                         if eval_done:
 
                             eval_obs = eval_env.reset()
-                            eval_episode_rewards.append(eval_episode_reward)
+                            epoch_eval_episode_rewards.append(eval_episode_reward)
+                        
                             eval_episode_rewards_history.append(eval_episode_reward)
                             eval_episode_reward = 0.
-
-            # Log stats.
+                   
+                            if eval_log:
+                                out.release()
+ 
+           # Log stats.
             epoch_train_duration = time.time() - epoch_start_time
             duration = time.time() - start_time
             stats = agent.get_stats()
@@ -174,29 +216,39 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
             combined_stats['train/loss_critic'] = mpi_mean(epoch_critic_losses)
             combined_stats['train/param_noise_distance'] = mpi_mean(epoch_adaptive_distances)
 
-            eval_stats_disp = False
-
             # Evaluation statistics.
-            if eval_env is not None and eval_stats_disp:
+            if eval_env is not None:
 
-                combined_stats['eval/return'] = mpi_mean(eval_episode_rewards)
-                combined_stats['eval/return_history'] = mpi_mean(np.mean(eval_episode_rewards_history))
-                combined_stats['eval/Q'] = mpi_mean(eval_qs)
-                combined_stats['eval/episodes'] = mpi_mean(len(eval_episode_rewards))
+                combined_stats['eval/return'] = np.mean(epoch_eval_episode_rewards)
+                combined_stats['eval/return_history'] = np.mean(eval_episode_rewards_history)
+                combined_stats['eval/Q'] = np.mean(epoch_eval_qs)
+                combined_stats['eval/episodes'] = len(epoch_eval_episode_rewards)
 
             # Total statistics.
+
             combined_stats['total/duration'] = mpi_mean(duration)
             combined_stats['total/steps_per_second'] = mpi_mean(float(t) / float(duration))
             combined_stats['total/episodes'] = mpi_mean(episodes)
             combined_stats['total/epochs'] = epoch + 1
             combined_stats['total/steps'] = t
-            
+           
             for key in sorted(combined_stats.keys()):
                 logger.record_tabular(key, combined_stats[key])
             logger.dump_tabular()
             logger.info('')
             logdir = logger.get_dir()
             
+            if rank == 0:
+                summaryA = sess.run(merged, 
+                      feed_dict={rollout_return_p: combined_stats['rollout/return'],
+                      rollout_Q_mean_p: combined_stats['rollout/Q_mean'], 
+                      eval_return_p: combined_stats['eval/return'],
+                      eval_Q_mean_p: combined_stats['eval/Q'],
+                      tr_loss_actor_p: combined_stats['train/loss_actor'],
+                      tr_loss_critic_p: combined_stats['train/loss_critic'] }
+                )
+                writer.add_summary(summaryA,epoch)
+
             if rank == 0 and logdir:
 
                 if hasattr(env, 'get_state'):
