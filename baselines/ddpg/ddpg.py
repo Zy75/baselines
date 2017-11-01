@@ -137,9 +137,9 @@ class DDPG(object):
         self.setup_stats()
         self.setup_target_network_updates()
 
-#        tf.summary.histogram('weight0', [var for var in self.actor.vars if 'actor/dense_2/kernel:0' in var.name] )
 
-        print("xxxxxxxxxxxxxxxxxxxxx",[var for var in self.actor.vars if 'actor/dense_2/kernel:0' in var.name])
+        [ tf.summary.histogram(var.name, var) for var in self.actor.trainable_vars ]
+        [ tf.summary.histogram(var.name, var) for var in self.critic.trainable_vars ]
 
     def setup_target_network_updates(self):
         actor_init_updates, actor_soft_updates = get_target_updates(self.actor.vars, self.target_actor.vars, self.tau)

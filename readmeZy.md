@@ -9,5 +9,8 @@ python3 -m baselines.ddpg.main
 
 GPU:GeForce GTX1060 6GB
 
-memo:
-print( self.sess.run([var for var in self.target_actor.vars if 'actor/dense_2/kernel:0' in var.name]) )
+Memo: 2017/11/1 I did major fix on ddpg/training.py but only slight changes on other files. So easy to track diffs.
+
+Changed Reacher max tsteps to 80 in gym env __init__ file.
+
+Replace reacher.py of gym mujoco env with this repo's.

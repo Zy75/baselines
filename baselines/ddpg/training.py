@@ -23,11 +23,13 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
     assert (np.abs(env.action_space.low) == env.action_space.high).all()  # we assume symmetric actions.
     max_action = env.action_space.high
     logger.info('scaling actions by {} before executing in env'.format(max_action))
+
     agent = DDPG(actor, critic, memory, env.observation_space.shape, env.action_space.shape,
         gamma=gamma, tau=tau, normalize_returns=normalize_returns, normalize_observations=normalize_observations,
         batch_size=batch_size, action_noise=action_noise, param_noise=param_noise, critic_l2_reg=critic_l2_reg,
         actor_lr=actor_lr, critic_lr=critic_lr, enable_popart=popart, clip_norm=clip_norm,
         reward_scale=reward_scale)
+
     logger.info('Using agent with the following configuration:')
     logger.info(str(agent.__dict__.items()))
 
@@ -45,20 +47,23 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
         agent.initialize(sess)
 
         agent.reset()
+    
         obs = env.reset()
+        episode_reward = 0.
+
         if eval_env is not None:
             eval_obs = eval_env.reset()
-
-        rollout_return_p = tf.placeholder(tf.float32, shape=(), name="roll_ret")
-        rollout_Q_mean_p = tf.placeholder(tf.float32, shape=(), name="roll_Q_mean")
-        eval_return_p = tf.placeholder(tf.float32, shape=(), name="eval_ret")
-        eval_Q_mean_p = tf.placeholder(tf.float32, shape=(), name="eval_Q_mean")
-        tr_loss_actor_p = tf.placeholder(tf.float32, shape=(), name="train_loss_actor")
-        tr_loss_critic_p = tf.placeholder(tf.float32, shape=(), name="train_loss_critic")
-
+            eval_episode_reward = 0.
 
         if rank == 0:
 
+            rollout_return_p = tf.placeholder(tf.float32, shape=(), name="roll_ret")
+            rollout_Q_mean_p = tf.placeholder(tf.float32, shape=(), name="roll_Q_mean")
+            eval_return_p = tf.placeholder(tf.float32, shape=(), name="eval_ret")
+            eval_Q_mean_p = tf.placeholder(tf.float32, shape=(), name="eval_Q_mean")
+            tr_loss_actor_p = tf.placeholder(tf.float32, shape=(), name="train_loss_actor")
+            tr_loss_critic_p = tf.placeholder(tf.float32, shape=(), name="train_loss_critic")
+     
             with tf.name_scope('summary'):
                 writer = tf.summary.FileWriter('tensorboard_log', sess.graph)
          
@@ -71,23 +76,18 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
    
                 merged = tf.summary.merge_all()
 
-
-        done = False
-        episode_reward = 0.
-        episode_step = 0
         episodes = 0
         t = 0
-        duration = 0
 
         start_time = time.time()
 
         for epoch in range(nb_epochs):
         
-            epoch_episode_rewards = []
-            epoch_episode_steps = []
             epoch_start_time = time.time()
-            epoch_actions = []
+
+            epoch_episode_rewards = []
             epoch_qs = []
+            epoch_actions = []
             epoch_episodes = 0
 
             epoch_eval_episode_rewards = []
@@ -103,19 +103,17 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                 for t_rollout in range(nb_rollout_steps):
                     # Predict next action.
                     action, q = agent.pi(obs, apply_noise=True, compute_Q=True)
-                    assert action.shape == env.action_space.shape
                      
                     # Execute next action.
                     if rank == 0 and render:
                         env.render()
-                    assert max_action.shape == action.shape
+
                     new_obs, r, done, info = env.step(max_action * action)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
                     t += 1
 
                     if rank == 0 and render:
                         env.render()
                     episode_reward += r
-                    episode_step += 1
 
                     # Book-keeping.
                     epoch_actions.append(action)
@@ -127,9 +125,8 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                         # Episode done.
                         epoch_episode_rewards.append(episode_reward)
                         episode_rewards_history.append(episode_reward)
-                        epoch_episode_steps.append(episode_step)
+
                         episode_reward = 0.
-                        episode_step = 0
                         epoch_episodes += 1
                         episodes += 1
 
@@ -150,10 +147,9 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
 
                 # Evaluate.
 
+# Zy: Now considering only the case when nb_eval_steps is equal to env.max_tsteps.
 
                 if eval_env is not None:
-                    eval_episode_reward = 0.
-                    eval_obs0 = None
 
                     eval_log = render_eval and epoch % eval_interval == 1 and cycle == 0
 
@@ -165,31 +161,35 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                     for t_rollout in range(nb_eval_steps):
                         
                         eval_action, eval_q = agent.pi(eval_obs, apply_noise=False, compute_Q=True)
-                        eval_obs, eval_r, eval_done, eval_info = eval_env.step(max_action * eval_action)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
+                        eval_new_obs, eval_r, eval_done, eval_info = eval_env.step(max_action * eval_action)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
                         
                         if eval_log:
                             
-                            out.write( eval_env.render(mode='rgb_array') )
+                            out.write(
+                              cv2.cvtColor( eval_env.render(mode='rgb_array') , cv2.COLOR_BGR2RGB ) 
+                            )
 
                             print("t=",t_rollout,"rank=",rank,"------------------------",)
-                            print("eval_obs=",eval_obs0)
+                            print("eval_obs=",eval_obs)
                             print("action=",eval_action)
-                            print("eval_new_obs=",eval_obs)
+                            print("eval_new_obs=",eval_new_obs)
                             print("reward,done=",eval_r,eval_done)
                             print(" ")
  
-                            eval_obs0 = eval_obs
-
                         eval_episode_reward += eval_r
+
+                        eval_obs = eval_new_obs
 
                         epoch_eval_qs.append(eval_q)
                         if eval_done:
 
-                            eval_obs = eval_env.reset()
                             epoch_eval_episode_rewards.append(eval_episode_reward)
-                        
                             eval_episode_rewards_history.append(eval_episode_reward)
+                
                             eval_episode_reward = 0.
+
+                            eval_obs = eval_env.reset()
+
                    
                             if eval_log:
                                 out.release()
@@ -205,7 +205,6 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
             # Rollout statistics.
             combined_stats['rollout/return'] = mpi_mean(epoch_episode_rewards)
             combined_stats['rollout/return_history'] = mpi_mean(np.mean(episode_rewards_history))
-            combined_stats['rollout/episode_steps'] = mpi_mean(epoch_episode_steps)
             combined_stats['rollout/episodes'] = mpi_sum(epoch_episodes)
             combined_stats['rollout/actions_mean'] = mpi_mean(epoch_actions)
             combined_stats['rollout/actions_std'] = mpi_std(epoch_actions)
@@ -238,7 +237,7 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
             logger.info('')
             logdir = logger.get_dir()
             
-            if rank == 0:
+            if rank == 0 and epoch % 4 == 1:
                 summaryA = sess.run(merged, 
                       feed_dict={rollout_return_p: combined_stats['rollout/return'],
                       rollout_Q_mean_p: combined_stats['rollout/Q_mean'], 
