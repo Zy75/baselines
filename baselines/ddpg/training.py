@@ -237,7 +237,7 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
             logger.info('')
             logdir = logger.get_dir()
             
-            if rank == 0 and epoch % 4 == 1:
+            if rank == 0 and epoch % 2 == 1:
                 summaryA = sess.run(merged, 
                       feed_dict={rollout_return_p: combined_stats['rollout/return'],
                       rollout_Q_mean_p: combined_stats['rollout/Q_mean'], 

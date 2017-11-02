@@ -4,7 +4,7 @@ import tensorflow.contrib as tc
 class Model(object):
     def __init__(self, name):
         self.name = name
-        self.nb_neuron = 96
+        self.nb_neuron = 128
 
     @property
     def vars(self):
