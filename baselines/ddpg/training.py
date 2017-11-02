@@ -35,7 +35,7 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
 
     # Set up logging stuff only for a single worker.
     if rank == 0:
-        saver = tf.train.Saver()
+        saver = tf.train.Saver(max_to_keep=30)
     else:
         saver = None
     
@@ -151,12 +151,7 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
 
                 if eval_env is not None:
 
-                    eval_log = render_eval and epoch % eval_interval == 1 and cycle == 0
-
-                    if eval_log:
-
-                        fourcc = cv2.VideoWriter_fourcc(*'MJPG')
-                        out = cv2.VideoWriter('mujoco_log' + str(epoch) + '.avi', fourcc, 50.0, (500,500))
+                    eval_log = epoch % eval_interval == 1 and cycle == 0
 
                     for t_rollout in range(nb_eval_steps):
                         
@@ -164,10 +159,6 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                         eval_new_obs, eval_r, eval_done, eval_info = eval_env.step(max_action * eval_action)  # scale for execution in env (as far as DDPG is concerned, every action is in [-1, 1])
                         
                         if eval_log:
-                            
-                            out.write(
-                              cv2.cvtColor( eval_env.render(mode='rgb_array') , cv2.COLOR_BGR2RGB ) 
-                            )
 
                             print("t=",t_rollout,"rank=",rank,"------------------------",)
                             print("eval_obs=",eval_obs)
@@ -190,10 +181,9 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
 
                             eval_obs = eval_env.reset()
 
-                   
                             if eval_log:
-                                out.release()
- 
+                                saver.save(sess, 'model/model.ckpt', global_step=epoch)
+
            # Log stats.
             epoch_train_duration = time.time() - epoch_start_time
             duration = time.time() - start_time
