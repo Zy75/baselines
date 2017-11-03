@@ -24,20 +24,25 @@ def pi(obs):
 
 with tf.device('/gpu:0'):
 
+    epoch = 101
+    seed = 53
+    n = 5000
+
     observation_range=(-5., 5.)
     action_range=(-1., 1.)
+
+    observation_shape=(11,)
 
     env_id = 'Reacher-v1'
     nb_actions = 2
     layer_norm = True
-    seed = 1
 
     actor = Actor(nb_actions, layer_norm=layer_norm)
 
     with tf.variable_scope('obs_rms'):
-        obs_rms = RunningMeanStd(shape=(11,))
+        obs_rms = RunningMeanStd(shape=observation_shape)
 
-    obs0 = tf.placeholder(tf.float32, shape=(None,) + (11,), name='obs0')
+    obs0 = tf.placeholder(tf.float32, shape=(None,) + observation_shape , name='obs0')
 
     normalized_obs0 = tf.clip_by_value(normalize(obs0, obs_rms),
        observation_range[0], observation_range[1])
@@ -49,20 +54,19 @@ with tf.device('/gpu:0'):
 
     max_action = eval_env.action_space.high
 
-
-
     sess = tf.InteractiveSession()
 
     saver = tf.train.Saver()
 
-    saver.restore(sess, 'model/model.ckpt-241')
+
+    saver.restore(sess, 'model/model.ckpt-' + str(epoch))
 
     fourcc = cv2.VideoWriter_fourcc(*'MJPG')
-    out = cv2.VideoWriter('/home/spctx770/baselines/model/mujoco_log.avi', fourcc, 50.0, (500,500))
+    out = cv2.VideoWriter('/home/spctx770/baselines/model/mujoco_log' + str(epoch) + '.avi', fourcc, 50.0, (500,500))
 
     eval_obs = eval_env.reset()
 
-    for _ in range(2000):
+    for _ in range(n):
 
         eval_action = pi(eval_obs)
 

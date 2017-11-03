@@ -14,7 +14,7 @@ class ReacherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
         vec = self.get_body_com("fingertip")-self.get_body_com("target")
         reward_dist = - np.linalg.norm(vec)
         reward_ctrl = - np.square(a).sum()
-        reward = reward_dist + 0.5 * reward_ctrl
+        reward = reward_dist + 0.05 * reward_ctrl
 
         ob = self._get_obs()
         done = False
