@@ -24,7 +24,7 @@ def pi(obs):
 
 with tf.device('/gpu:0'):
 
-    epoch = 101
+    epoch = 271
     seed = 53
     n = 5000
 

@@ -19,3 +19,7 @@ Replace reacher.py of gym mujoco env with this repo's.
 python3 test.py to visualize.
 
 best model in completed_model/
+
+max tsteps to 120.
+
+11/5 Trying PPO Hopper

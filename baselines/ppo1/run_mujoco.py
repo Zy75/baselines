@@ -33,7 +33,7 @@ def main():
     parser.add_argument('--env', help='environment ID', default='Hopper-v1')
     parser.add_argument('--seed', help='RNG seed', type=int, default=0)
     args = parser.parse_args()
-    train(args.env, num_timesteps=1e6, seed=args.seed)
+    train(args.env, num_timesteps=2e6, seed=args.seed)
 
 
 if __name__ == '__main__':

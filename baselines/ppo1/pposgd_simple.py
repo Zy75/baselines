@@ -89,12 +89,37 @@ def learn(env, policy_func, *,
         ):
     # Setup losses and stuff
     # ----------------------------------------
+    
+    rank = MPI.COMM_WORLD.Get_rank()
+
+    sess = tf.get_default_session()
+
+
     ob_space = env.observation_space
     ac_space = env.action_space
     pi = policy_func("pi", ob_space, ac_space) # Construct network for new policy
     oldpi = policy_func("oldpi", ob_space, ac_space) # Network for old policy
     atarg = tf.placeholder(dtype=tf.float32, shape=[None]) # Target advantage function (if applicable)
     ret = tf.placeholder(dtype=tf.float32, shape=[None]) # Empirical return
+
+
+    if rank == 0:
+        
+        saver = tf.train.Saver(max_to_keep=30)
+
+        [ tf.summary.histogram(var.name, var) for var in pi.get_trainable_variables() ]
+      
+        total_loss_p = tf.placeholder(tf.float32, shape=(), name="total_loss_p")
+        rew_mean_p = tf.placeholder(tf.float32, shape=(), name="rew_mean_p")
+
+            
+        with tf.name_scope('summary'):
+            writer = tf.summary.FileWriter('tensorboard_log', sess.graph)
+         
+            tf.summary.scalar('total_loss_p', total_loss_p)
+            tf.summary.scalar('rew_mean_p', rew_mean_p)
+   
+            merged = tf.summary.merge_all()
 
     lrmult = tf.placeholder(name='lrmult', dtype=tf.float32, shape=[]) # learning rate multiplier, updated with schedule
     clip_param = clip_param * lrmult # Annealed cliping parameter epislon
@@ -159,7 +184,8 @@ def learn(env, policy_func, *,
         else:
             raise NotImplementedError
 
-        logger.log("********** Iteration %i ************"%iters_so_far)
+        if rank == 0:
+            logger.log("********** Iteration %i ************"%iters_so_far)
 
         seg = seg_gen.__next__()
         add_vtarg_and_adv(seg, gamma, lam)
@@ -174,8 +200,9 @@ def learn(env, policy_func, *,
         if hasattr(pi, "ob_rms"): pi.ob_rms.update(ob) # update running mean/std for policy
 
         assign_old_eq_new() # set old parameter values to new parameter values
-        logger.log("Optimizing...")
-        logger.log(fmt_row(13, loss_names))
+        if rank == 0: 
+            logger.log("Optimizing...")
+            logger.log(fmt_row(13, loss_names))
         # Here we do a bunch of optimization epochs over the data
         for _ in range(optim_epochs):
             losses = [] # list of tuples, each of which gives the loss for a minibatch
@@ -183,15 +210,20 @@ def learn(env, policy_func, *,
                 *newlosses, g = lossandgrad(batch["ob"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult)
                 adam.update(g, optim_stepsize * cur_lrmult) 
                 losses.append(newlosses)
-            logger.log(fmt_row(13, np.mean(losses, axis=0)))
-
-        logger.log("Evaluating losses...")
+            if rank == 0:
+                logger.log(fmt_row(13, np.mean(losses, axis=0)))
+    
+        if rank == 0:
+           logger.log("Evaluating losses...")
+    
         losses = []
         for batch in d.iterate_once(optim_batchsize):
             newlosses = compute_losses(batch["ob"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult)
             losses.append(newlosses)            
         meanlosses,_,_ = mpi_moments(losses, axis=0)
-        logger.log(fmt_row(13, meanlosses))
+        mean_loss_f = meanlosses
+        if rank == 0:
+           logger.log(fmt_row(13, meanlosses))
         for (lossval, name) in zipsame(meanlosses, loss_names):
             logger.record_tabular("loss_"+name, lossval)
         logger.record_tabular("ev_tdlam_before", explained_variance(vpredbefore, tdlamret))
@@ -202,6 +234,7 @@ def learn(env, policy_func, *,
         rewbuffer.extend(rews)
         logger.record_tabular("EpLenMean", np.mean(lenbuffer))
         logger.record_tabular("EpRewMean", np.mean(rewbuffer))
+        rew_mean_f = np.mean(rewbuffer)
         logger.record_tabular("EpThisIter", len(lens))
         episodes_so_far += len(lens)
         timesteps_so_far += sum(lens)
@@ -211,6 +244,20 @@ def learn(env, policy_func, *,
         logger.record_tabular("TimeElapsed", time.time() - tstart)
         if MPI.COMM_WORLD.Get_rank()==0:
             logger.dump_tabular()
+
+        if rank == 0 and iters_so_far % 20 == 1:
+            saver.save(sess, 'baselines/ppo1/model/model.ckpt', global_step=iters_so_far)
+
+        if rank == 0 and iters_so_far % 10 == 0:
+            pol_surr_s = mean_loss_f[0]
+            pol_entpen_s = mean_loss_f[1]
+            vf_loss_s = mean_loss_f[2]
+
+            summaryA = sess.run(merged, 
+                feed_dict={ total_loss_p: pol_surr_s + pol_entpen_s + vf_loss_s,
+                            rew_mean_p: rew_mean_f }  
+            )
+            writer.add_summary(summaryA,iters_so_far)
 
 def flatten_lists(listoflists):
     return [el for list_ in listoflists for el in list_]
