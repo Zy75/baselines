@@ -182,7 +182,7 @@ def train(env, nb_epochs, nb_epoch_cycles, render_eval, reward_scale, render, pa
                             eval_obs = eval_env.reset()
 
                             if eval_log:
-                                saver.save(sess, 'model/model.ckpt', global_step=epoch)
+                                saver.save(sess, 'baselines/ddpg/model/model.ckpt', global_step=epoch)
 
            # Log stats.
             epoch_train_duration = time.time() - epoch_start_time

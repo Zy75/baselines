@@ -33,3 +33,4 @@ src
 
 model/
 tensorboard_log/
+baselines/ddpg/model/
