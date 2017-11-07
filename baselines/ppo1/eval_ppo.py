@@ -16,17 +16,17 @@ def enjoy(env_id, num_timesteps, seed):
     env = gym.make(env_id)
     def policy_fn(name, ob_space, ac_space):
         return mlp_policy.MlpPolicy(name=name, ob_space=ob_space, ac_space=ac_space,
-            hid_size=64, num_hid_layers=2)
+            hid_size=128, num_hid_layers=2)
     obs = env.reset()
     env.seed(seed)
     pi = policy_fn('pi', env.observation_space, env.action_space)
  
-    inum = 241
+    inum = 561
 
     tf.train.Saver().restore(sess, 'model/model.ckpt-' + str(inum))
     
     while True:
-        action = pi.act(True, obs)[0]
+        action = pi.act(True,obs)[0]
         obs, reward, done, info = env.step(action)
         env.render()
          
@@ -35,7 +35,7 @@ def enjoy(env_id, num_timesteps, seed):
 
 def main():
     parser = ArgumentParser()
-    parser.add_argument('--env', type=str, default='Hopper-v1')
+    parser.add_argument('--env', type=str, default='Reacher-v1')
     enjoy(parser.parse_args().env, num_timesteps=1e6, seed=0)
 
 

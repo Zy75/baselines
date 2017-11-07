@@ -34,6 +34,7 @@ def traj_segment_generator(pi, env, horizon, stochastic):
         # before returning segment [0, T-1] so we get the correct
         # terminal value
         if t > 0 and t % horizon == 0:
+            print(news)
             yield {"ob" : obs, "rew" : rews, "vpred" : vpreds, "new" : news,
                     "ac" : acs, "prevac" : prevacs, "nextvpred": vpred * (1 - new),
                     "ep_rets" : ep_rets, "ep_lens" : ep_lens}
@@ -94,14 +95,12 @@ def learn(env, policy_func, *,
 
     sess = tf.get_default_session()
 
-
     ob_space = env.observation_space
     ac_space = env.action_space
     pi = policy_func("pi", ob_space, ac_space) # Construct network for new policy
     oldpi = policy_func("oldpi", ob_space, ac_space) # Network for old policy
     atarg = tf.placeholder(dtype=tf.float32, shape=[None]) # Target advantage function (if applicable)
     ret = tf.placeholder(dtype=tf.float32, shape=[None]) # Empirical return
-
 
     if rank == 0:
         
@@ -212,10 +211,8 @@ def learn(env, policy_func, *,
                 losses.append(newlosses)
             if rank == 0:
                 logger.log(fmt_row(13, np.mean(losses, axis=0)))
-    
         if rank == 0:
            logger.log("Evaluating losses...")
-    
         losses = []
         for batch in d.iterate_once(optim_batchsize):
             newlosses = compute_losses(batch["ob"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult)
@@ -248,7 +245,7 @@ def learn(env, policy_func, *,
         if rank == 0 and iters_so_far % 20 == 1:
             saver.save(sess, 'baselines/ppo1/model/model.ckpt', global_step=iters_so_far)
 
-        if rank == 0 and iters_so_far % 10 == 0:
+        if rank == 0 and iters_so_far % 5 == 1:
             pol_surr_s = mean_loss_f[0]
             pol_entpen_s = mean_loss_f[1]
             vf_loss_s = mean_loss_f[2]
